@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <numeric>
 #include <boost/lexical_cast.hpp>
 #include <boost/function.hpp>
 #include "peg.hpp"
@@ -60,13 +61,16 @@ typedef t<ch<')'>::type> close_paren;
 template<class T, class Op>
 struct left_assoc_expr
 {
-  int v;
-  void action(const T& e, const rep<fusion::vector<Op, T> >& elist) {
-    v = e.v;
-    typedef typename rep<fusion::vector<Op, T> >::const_iterator It;
-    for (It i = elist.begin(); i != elist.end(); ++i) {
-      v = fusion::at_c<0>(*i)(v, fusion::at_c<1>(*i).v);
+  typedef typename boost::result_of<Op(T,T)>::type result_type;
+  result_type v;
+  
+  struct f {
+    result_type operator()(const result_type& e, const fusion::vector<Op, T>& x) {
+      return fusion::at_c<0>(x)(e, fusion::at_c<1>(x).v);
     }
+  };
+  void action(const T& e, const rep<fusion::vector<Op, T> >& elist) {
+    v = std::accumulate(elist.begin(), elist.end(), e.v, f());
   }
 };
 

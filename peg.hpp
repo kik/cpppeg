@@ -86,7 +86,11 @@ namespace peg {
   };
 
   template<class T>
-  struct ptr : public boost::shared_ptr<T> {
+  struct ptr : public T::result_type {
+    typedef typename T::result_type base_type;
+    ptr() : base_type() {}
+    ptr(const base_type& v) : base_type(v) {}
+    ptr(const ptr& v) : base_type(v) {}
   };
 
   template<class T>
@@ -164,16 +168,6 @@ namespace peg {
       }
     };
     
-    template<class T, class Input>
-    struct match_elem<ptr<T>, Input> {
-      static bool match(ptr<T>& t, Input& begin, Input end) {
-        T s;
-        if (!match_elem<T, Input>::match(s, begin, end)) return false;
-        t = new T(s);
-        return true;
-      }
-    };
-
     template<class T, class Input>
     struct match_elem<opt<T>, Input> {
       static bool match(opt<T>& t, Input& begin, Input end) {
@@ -262,6 +256,7 @@ namespace peg {
     }
     
     struct parse_action_tag {};
+    struct parse_ptr_action_tag {};
     struct parse_sequence_tag {};
 
     template<class T, class Tag>
@@ -290,6 +285,27 @@ namespace peg {
     };
 
     template<class T>
+    struct select_parse_fun<ptr<T>, parse_ptr_action_tag> {
+      template<class Fun, class Input>
+      static bool parse_fun_by_action(Fun fun, ptr<T>& t, Input& begin, Input end) {
+        typedef typename boost::function_types::parameter_types<Fun>::type param_list;
+        typedef parse_fun_types<param_list> types;
+        typename types::result_list_type result;
+        if (parse_fun_core(result, begin, end)) {
+          t = boost::fusion::invoke(fun, result);
+          return true;
+        } else {
+          return false;
+        }
+      }
+
+      template<class Input>
+      static bool parse_fun(ptr<T>& t, Input& begin, Input end) {
+        return parse_fun_by_action(&T::action, t, begin, end);
+      }
+    };
+
+    template<class T>
     struct select_parse_fun<T, parse_sequence_tag> {
       template<class Input>
       static bool parse_fun(T& t, Input& begin, Input end) {
@@ -301,6 +317,11 @@ namespace peg {
     struct parse_tag_of {
       typedef typename boost::mpl::if_<typename boost::fusion::traits::is_sequence<T>::type,
                                        parse_sequence_tag, parse_action_tag>::type type;
+    };
+
+    template<class T>
+    struct parse_tag_of<ptr<T> > {
+      typedef parse_ptr_action_tag type;
     };
 
     template<class T, class Input>
