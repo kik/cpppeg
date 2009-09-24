@@ -278,26 +278,71 @@ namespace peg {
 
     template<class T, class Tag>
     struct select_parse_fun;
+
+    template<class Fun, class T, class Context>
+    inline bool execute_action(Fun fun, T& t, Context *ctx) {
+      typedef typename boost::function_types::parameter_types<Fun>::type param_list_1;
+      typedef typename boost::mpl::pop_front<param_list_1>::type param_list;
+      typedef parse_fun_types<param_list> types;
+      typename types::result_list_type result;
+
+      typename Context::input_type cur = ctx->cur;
+      if (parse_fun_core(result, ctx)) {
+        boost::fusion::invoke(fun, boost::fusion::push_front(result, &t));
+        return true;
+      } else {
+        ctx->cur = cur;
+        return false;
+      }
+    }
+
+    template<std::size_t n>
+    struct param;
+    
+    template<class T, class Context>
+    struct rep_action {
+
+      template<class U>
+      static bool call_action(U& t, Context *ctx, param<0 * sizeof(&U::action)> *p) {
+        return execute_action(&T::action, t, ctx);
+      }
+
+      static bool call_action(T& t, Context *ctx, ...) {
+        return call_action_0(t, ctx, false, (param<0>*)0);
+      }
+
+      template<class U>
+      static bool call_action_0(U& t, Context *ctx, bool executed, param<0 * sizeof(&U::action_0)> *pp) {
+        return execute_action(&T::action_0, t, ctx) || call_action_1(t, ctx, true, (param<0>*)0);
+      }
+
+      static bool call_action_0(T& t, Context *ctx, bool executed, ...) {
+        return call_action_1(t, ctx, executed, (param<0>*)0);
+      }
+      
+      template<class U>
+      static bool call_action_1(U& t, Context *ctx, bool executed, param<0 * sizeof(&U::action_1)> *pp) {
+        return execute_action(&T::action_1, t, ctx) || call_action_2(t, ctx, true, (param<0>*)0);
+      }
+
+      static bool call_action_1(T& t, Context *ctx, bool executed, ...) {
+        return call_action_2(t, ctx, executed, (param<0>*)0);
+      }
+      
+      static bool call_action_2(T& t, Context *ctx, bool executed, ...) {
+        return false;
+      }
+
+      static bool start(T& t, Context *ctx) {
+        return call_action(t, ctx, (param<0>*)0);
+      }
+    };
     
     template<class T>
     struct select_parse_fun<T, parse_action_tag> {
-      template<class Fun, class Context>
-      static bool parse_fun_by_action(Fun fun, T& t, Context *ctx) {
-        typedef typename boost::function_types::parameter_types<Fun>::type param_list_1;
-        typedef typename boost::mpl::pop_front<param_list_1>::type param_list;
-        typedef parse_fun_types<param_list> types;
-        typename types::result_list_type result;
-        if (parse_fun_core(result, ctx)) {
-          boost::fusion::invoke(fun, boost::fusion::push_front(result, &t));
-          return true;
-        } else {
-          return false;
-        }
-      }
-      
       template<class Context>
       static bool parse_fun(T& t, Context *ctx) {
-        return parse_fun_by_action(&T::action, t, ctx);
+        return rep_action<T, Context>::start(t, ctx);
       }
     };
 

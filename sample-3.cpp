@@ -31,12 +31,11 @@ struct op_or : public boost::function<int(int,int)>
     *static_cast<Base *>(this) = x;
     return *this;
   }
-  void action(const T& t, sor orr, const U& u) {
-    if (orr.left) {
-      *this = t;
-    } else {
-      *this = u;
-    }
+  void action_0(const T& t) {
+    *this = t;
+  }
+  void action_1(const U& u) {
+    *this = u;
   }
 };
 
