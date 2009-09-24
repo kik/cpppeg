@@ -101,30 +101,42 @@ namespace peg {
     bool left;
   };
 
+  namespace pi {
+    struct null_struct;
+  }
+  
+  template<class T = pi::null_struct>
+  struct context {
+    size_t size;
+    size_t pos;
+    T *v;
+    T *operator->() { return v; }
+  };
+
   template<class T>
   struct term : public T {
   };
 
   namespace pi {
-    template<class T, class Input>
+    template<class T, class Context>
     struct match_non_term {
-      static bool match(T& t, Input& begin, Input end) {
-        return parse_fun(t, begin, end);
+      static bool match(T& t, Context *ctx) {
+        return parse_fun(t, ctx);
       }
     };
 
-    template<class T, class Input>
-    struct match_elem : match_non_term<T, Input> {
+    template<class T, class Context>
+    struct match_elem : match_non_term<T, Context> {
     };
 
-    template<class T, class Input>
-    struct match_elem<chr<T>, Input> {
-      static bool match(chr<T>& t, Input& begin, Input end) {
-        if (begin != end) {
-          char c = *begin;
+    template<class T, class Context>
+    struct match_elem<chr<T>, Context> {
+      static bool match(chr<T>& t, Context *ctx) {
+        if (ctx->cur != ctx->end) {
+          char c = *ctx->cur;
           if (T()(c)) {
             t.v = c;
-            ++begin;
+            ++ctx->cur;
             return true;
           }
         }
@@ -132,47 +144,47 @@ namespace peg {
       }
     };
     
-    template<class Input>
-    struct match_elem<eoi, Input> {
-      static bool match(eoi& t, Input& begin, Input end) {
-        return begin == end;
+    template<class Context>
+    struct match_elem<eoi, Context> {
+      static bool match(eoi& t, Context *ctx) {
+        return ctx->cur == ctx->end;
       }
     };
 
-    template<class T, class C, class Input>
-    struct match_elem<rep<T, C>, Input> {
-      static bool match(rep<T>& t, Input& begin, Input end) {
+    template<class T, class C, class Context>
+    struct match_elem<rep<T, C>, Context> {
+      static bool match(rep<T>& t, Context *ctx) {
         for (;;) {
           T s;
-          if (!match_elem<T, Input>::match(s, begin, end)) break;
+          if (!match_elem<T, Context>::match(s, ctx)) break;
           t.push_back(s);
         }
         return true;
       }
     };
 
-    template<class T, class C, class Input>
-    struct match_elem<replus<T, C>, Input> {
-      static bool match(replus<T>& t, Input& begin, Input end) {
+    template<class T, class C, class Context>
+    struct match_elem<replus<T, C>, Context> {
+      static bool match(replus<T>& t, Context *ctx) {
         {
           T s;
-          if (!match_elem<T, Input>::match(s, begin, end)) return false;
+          if (!match_elem<T, Context>::match(s, ctx)) return false;
           t.push_back(s);
         }
         for (;;) {
           T s;
-          if (!match_elem<T, Input>::match(s, begin, end)) break;
+          if (!match_elem<T, Context>::match(s, ctx)) break;
           t.push_back(s);
         }
         return true;
       }
     };
     
-    template<class T, class Input>
-    struct match_elem<opt<T>, Input> {
-      static bool match(opt<T>& t, Input& begin, Input end) {
+    template<class T, class Context>
+    struct match_elem<opt<T>, Context> {
+      static bool match(opt<T>& t, Context *ctx) {
         T s;
-        if (!match_elem<T, Input>::match(s, begin, end)) {
+        if (!match_elem<T, Context>::match(s, ctx)) {
           t = 0;
         } else {
           t = new T(s);
@@ -181,33 +193,40 @@ namespace peg {
       }
     };
 
-    template<class Input>
+    template<class Context>
     struct parse_fun_state {
       bool finished;
       bool skipping;
-      Input start;
-      Input cur;
-      Input end;
+      typename Context::input_type start;
     };
 
-    template<class T, class Input>
+    template<class T, class Context>
     struct rule_step {
-      static void run(T& t, parse_fun_state<Input> *state) {
+      static void run(T& t, parse_fun_state<Context> *state, Context *ctx) {
         if (state->finished || state->skipping) {
         } else {
-          state->skipping = !match_elem<T, Input>::match(t, state->cur, state->end);
+          state->skipping = !match_elem<T, Context>::match(t, ctx);
         }
       }
     };
+
+    template<class T, class Context>
+    struct rule_step<context<T>, Context> {
+      static void run(context<T>& t, parse_fun_state<Context> *state, Context *ctx) {
+        t.size = ctx->end - ctx->begin;
+        t.pos = ctx->cur - ctx->begin;
+        t.v = &ctx->t;
+      }
+    };
     
-    template<class Input>
-    struct rule_step<sor, Input> {
-      static void run(sor& t, parse_fun_state<Input> *state) {
+    template<class Context>
+    struct rule_step<sor, Context> {
+      static void run(sor& t, parse_fun_state<Context> *state, Context *ctx) {
         if (state->finished) {
           t.left = true;
         } else if (state->skipping) {
           state->skipping = false;
-          state->cur = state->start;
+          ctx->cur = state->start;
           t.left = false;
         } else {
           state->finished = true;
@@ -216,16 +235,17 @@ namespace peg {
       }
     };
 
-    template<class Input>
+    template<class Context>
     struct run_steps_fun {
-      parse_fun_state<Input> *state;
+      parse_fun_state<Context> *state;
+      Context *context;
 
-      run_steps_fun(parse_fun_state<Input> *st) : state(st) {
+      run_steps_fun(parse_fun_state<Context> *st, Context *ctx) : state(st), context(ctx) {
       }
       
       template<class T>
       void operator()(T& t) const {
-        rule_step<T, Input>::run(t, state);
+        rule_step<T, Context>::run(t, state, context);
       }
     };
 
@@ -237,20 +257,17 @@ namespace peg {
       typedef typename boost::fusion::result_of::as_vector<param_list_type>::type result_list_type;
     };
 
-    template<class T, class Input>
-    inline bool parse_fun_core(T& t, Input& begin, Input end) {
-      parse_fun_state<Input> state;
+    template<class T, class Context>
+    inline bool parse_fun_core(T& t, Context *ctx) {
+      parse_fun_state<Context> state;
       state.finished = false;
       state.skipping = false;
-      state.cur = begin;
-      state.start = begin;
-      state.end = end;
-      run_steps_fun<Input> step(&state);
+      state.start = ctx->cur;
+      run_steps_fun<Context> step(&state, ctx);
       boost::fusion::for_each(t, step);
       if (!state.finished && state.skipping) {
         return false;
       } else {
-        begin = state.cur;
         return true;
       }
     }
@@ -264,13 +281,13 @@ namespace peg {
     
     template<class T>
     struct select_parse_fun<T, parse_action_tag> {
-      template<class Fun, class Input>
-      static bool parse_fun_by_action(Fun fun, T& t, Input& begin, Input end) {
+      template<class Fun, class Context>
+      static bool parse_fun_by_action(Fun fun, T& t, Context *ctx) {
         typedef typename boost::function_types::parameter_types<Fun>::type param_list_1;
         typedef typename boost::mpl::pop_front<param_list_1>::type param_list;
         typedef parse_fun_types<param_list> types;
         typename types::result_list_type result;
-        if (parse_fun_core(result, begin, end)) {
+        if (parse_fun_core(result, ctx)) {
           boost::fusion::invoke(fun, boost::fusion::push_front(result, &t));
           return true;
         } else {
@@ -278,20 +295,20 @@ namespace peg {
         }
       }
       
-      template<class Input>
-      static bool parse_fun(T& t, Input& begin, Input end) {
-        return parse_fun_by_action(&T::action, t, begin, end);
+      template<class Context>
+      static bool parse_fun(T& t, Context *ctx) {
+        return parse_fun_by_action(&T::action, t, ctx);
       }
     };
 
     template<class T>
     struct select_parse_fun<ptr<T>, parse_ptr_action_tag> {
-      template<class Fun, class Input>
-      static bool parse_fun_by_action(Fun fun, ptr<T>& t, Input& begin, Input end) {
+      template<class Fun, class Context>
+      static bool parse_fun_by_action(Fun fun, ptr<T>& t, Context *ctx) {
         typedef typename boost::function_types::parameter_types<Fun>::type param_list;
         typedef parse_fun_types<param_list> types;
         typename types::result_list_type result;
-        if (parse_fun_core(result, begin, end)) {
+        if (parse_fun_core(result, ctx)) {
           t = boost::fusion::invoke(fun, result);
           return true;
         } else {
@@ -299,17 +316,17 @@ namespace peg {
         }
       }
 
-      template<class Input>
-      static bool parse_fun(ptr<T>& t, Input& begin, Input end) {
-        return parse_fun_by_action(&T::action, t, begin, end);
+      template<class Context>
+      static bool parse_fun(ptr<T>& t, Context *ctx) {
+        return parse_fun_by_action(&T::action, t, ctx);
       }
     };
 
     template<class T>
     struct select_parse_fun<T, parse_sequence_tag> {
-      template<class Input>
-      static bool parse_fun(T& t, Input& begin, Input end) {
-        return parse_fun_core(t, begin, end);
+      template<class Context>
+      static bool parse_fun(T& t, Context *ctx) {
+        return parse_fun_core(t, ctx);
       }
     };
 
@@ -324,20 +341,36 @@ namespace peg {
       typedef parse_ptr_action_tag type;
     };
 
-    template<class T, class Input>
-    inline bool parse_fun(T& t, Input& begin, Input end) {
-      return select_parse_fun<T, typename parse_tag_of<T>::type>::parse_fun(t, begin, end);
+    template<class T, class Context>
+    inline bool parse_fun(T& t, Context *ctx) {
+      return select_parse_fun<T, typename parse_tag_of<T>::type>::parse_fun(t, ctx);
     }
+
+    struct null_struct {};
+    
+    template<class Input, class T = null_struct>
+    struct parser_context {
+      T t;
+      typedef Input input_type;
+      typedef T context_type;
+      Input begin;
+      Input cur;
+      Input end;
+    };
   }
 
-  template<class T>
+  template<class T, class Context = pi::null_struct>
   struct parser {
     parser() {
     }
 
     template<class Input>
     bool parse(T& t, Input begin, Input end) {
-      return pi::parse_fun(t, begin, end);
+      pi::parser_context<Input, Context> ctx;
+      ctx.begin = begin;
+      ctx.cur = begin;
+      ctx.end = end;
+      return pi::parse_fun(t, &ctx);
     }
   };
 }
