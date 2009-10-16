@@ -39,19 +39,18 @@ struct op_s
 };
 
 typedef token<op_s> op;
-typedef token<ch<'('>::type> open_paren;
-typedef token<ch<')'>::type> close_paren;
+typedef token<ch<'('> > open_paren;
+typedef token<ch<')'> > close_paren;
 
 struct expr
 {
   int v;
-  void action(int_lit e, sor orr,
-              open_paren, op o, const expr& e1, const expr& e2, close_paren) {
-    if (orr.left) {
-      v = e.v;
-    } else {
-      v = o.v(e1.v, e2.v);
-    }
+  void action_0(int_lit e) {
+    v = e.v;
+  }
+
+  void action_1(open_paren, op o, const expr& e1, const expr& e2, close_paren) {
+    v = o.v(e1.v, e2.v);
   }
 };
 

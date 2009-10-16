@@ -20,7 +20,7 @@ struct t : public T
 template<char c, class T>
 struct op_t : public T
 {
-  void action(t<typename ch<c>::type>) {}
+  void action(t<ch<c> >) {}
 };
 
 template<class T, class U>
@@ -54,8 +54,8 @@ struct int_lit_s
 
 typedef t<int_lit_s> int_lit;
 
-typedef t<ch<'('>::type> open_paren;
-typedef t<ch<')'>::type> close_paren;
+typedef t<ch<'('> > open_paren;
+typedef t<ch<')'> > close_paren;
 
 template<class T, class Op>
 struct left_assoc_expr
@@ -81,9 +81,12 @@ typedef left_assoc_expr<multi_expr, op_or<op_plus, op_minus> > expr;
 struct primary_expr
 {
   int v;
-  void action(int_lit lit, sor orr,
-              open_paren, const expr& e, close_paren) {
-    v = orr.left ? lit.v : e.v;
+  void action_0(int_lit lit) {
+    v = lit.v;
+  }
+
+  void action_1(open_paren, const expr& e, close_paren) {
+    v = e.v;
   }
 };
 

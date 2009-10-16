@@ -20,7 +20,7 @@ struct t : public T
 template<char c, class T>
 struct op_t : public T
 {
-  void action(t<typename ch<c>::type>) {}
+  void action(t<ch<c> >) {}
 };
 
 template<class T, class U>
@@ -31,12 +31,12 @@ struct op_or : public boost::function<int(int,int)>
     *static_cast<Base *>(this) = x;
     return *this;
   }
-  void action(const T& t, sor orr, const U& u) {
-    if (orr.left) {
-      *this = t;
-    } else {
-      *this = u;
-    }
+  void action_0(const T& t) {
+    *this = t;
+  }
+
+  void action_1(const U& u) {
+    *this = u;
   }
 };
 
@@ -55,8 +55,8 @@ struct int_lit_s
 
 typedef t<int_lit_s> int_lit;
 
-typedef t<ch<'('>::type> open_paren;
-typedef t<ch<')'>::type> close_paren;
+typedef t<ch<'('> > open_paren;
+typedef t<ch<')'> > close_paren;
 
 struct tree;
 typedef boost::shared_ptr<tree> ptree;
@@ -103,15 +103,14 @@ struct primary_expr : public tree
 {
   int v;
   int eval() const { return v; }
-  static ptree action(int_lit lit, sor orr,
-                      open_paren, const ptr<expr>& e, close_paren) {
-    if (orr.left) {
-      primary_expr *p = new primary_expr;
-      p->v = lit.v;
-      return ptree(p);
-    } else {
-      return e;
-    }
+  static ptree action_0(int_lit lit) {
+    primary_expr *p = new primary_expr;
+    p->v = lit.v;
+    return ptree(p);
+  }
+
+  static ptree action_1(open_paren, const ptr<expr>& e, close_paren) {
+    return e;
   }
 };
 

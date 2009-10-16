@@ -28,63 +28,194 @@
 #include <boost/fusion/container/vector/convert.hpp>
 
 namespace peg {
+  struct tag_terminal;
+  struct tag_non_terminal;
 
-  template<class Constraint>
-  struct chr {
+  template<class T>
+  struct terminal_trait_base {
+    typedef tag_terminal tag_type;
+    typedef T value_type;
+  };
+
+  struct char_terminal_trait_base : public terminal_trait_base<char> {
+  };
+
+  template<class T>
+  struct non_terminal_trait_base {
+    typedef tag_non_terminal tag_type;
+    typedef T value_type;
+  };
+  
+  template<class T>
+  struct symbol_trait : public non_terminal_trait_base<T> {
+    // default is non-terminal.
+  };
+
+  struct char_symbol_base {
     char v;
-    chr(char vv = 0) : v(vv) {}
+    char_symbol_base(char vv = 0) : v(vv) {}
+    char operator=(char vv) { v = vv; return vv; }
     operator char() const { return v; }
   };
 
-  template<char s, char e>
-  struct chr_range_constraint {
-    bool operator()(char c) { return s <= c && c <= e; }
-  };
+  // matches single char C.
+  template<char C>
+  struct ch : public char_symbol_base {
+    ch(char vv = 0) : char_symbol_base(vv) {}
 
+    template<class Context>
+    bool match(Context *ctx) {
+      if (ctx->cur != ctx->end && *ctx->cur == C) {
+        v = *ctx->cur;
+        ++ctx->cur;
+        return true;
+      }
+      return false;
+    }
+  };
+  template<char C>struct symbol_trait<ch<C> > : public char_terminal_trait_base {};
+
+  // matches character range CL <= c <= CH.
+  template<char CL, char CH>
+  struct chr : public char_symbol_base {
+    chr(char vv = 0) : char_symbol_base(vv) {}
+
+    template<class Context>
+    bool match(Context *ctx) {
+      if (ctx->cur != ctx->end) {
+        char c = *ctx->cur;
+        if (CL <= c && c <= CH) {
+          v = c;
+          ++ctx->cur;
+          return true;
+        }
+      }
+      return false;
+    }
+  };
+  template<char CL, char CH>struct symbol_trait<chr<CL, CH> > : public char_terminal_trait_base {};
+
+  // matches character terminal T or U.
   template<class T, class U>
-  struct chr_or_constraint {
-    bool operator()(char c) { return T()(c) || U()(c); }
-  };
+  struct cho : public char_symbol_base {
+    cho(char vv = 0) : char_symbol_base(vv) {}
 
-  template<char c>
-  struct ch {
-    typedef chr<chr_range_constraint<c, c> > type;
+    template<class Context>
+    bool match(Context *ctx) {
+      T t;
+      if (t.match(ctx)) {
+        v = static_cast<char>(t);
+        return true;
+      } else {
+        U u;
+        if (u.match(ctx)) {
+          v = static_cast<char>(t);
+          return true;
+        }
+      }
+      return false;
+    }
   };
-  
-  template<class T>
-  struct constraint_of;
+  template<class T, class U>struct symbol_trait<cho<T, U> > : public char_terminal_trait_base {};
 
-  template<class T>
-  struct constraint_of<chr<T> > {
-    typedef T type;
-  };
-  
-  typedef chr<chr_range_constraint<'a', 'z'> > lower;
-  typedef chr<chr_range_constraint<'A', 'Z'> > upper;
-  typedef chr<chr_range_constraint<'0', '9'> > digit;
-  typedef chr<chr_or_constraint<constraint_of<lower>::type, constraint_of<upper>::type > > alpha;
-  typedef ch<' '>::type ws;
+  typedef chr<'a', 'z'> lower;
+  typedef chr<'A', 'Z'> upper;
+  typedef chr<'0', '9'> digit;
+  typedef cho<lower, upper> alpha;
+  typedef cho<ch<' '>, cho<ch<'\n'>, cho<ch<'\r'>, cho<ch<'\t'>, ch<'\f'> > > > > ws;
 
+  // matches end of input.
   struct eoi {
+    template<class Context>
+    bool match(Context *ctx) {
+      return ctx->cur == ctx->end;
+    }
+  };
+  template<>struct symbol_trait<eoi> : public terminal_trait_base<eoi> {};
+
+  namespace pi {
+    struct null_struct;
+  }
+
+  template<class T = pi::null_struct>
+  struct context {
+    size_t size;
+    size_t pos;
+    T *v;
+    T *operator->() { return v; }
   };
 
+  namespace pi {
+    template<class T, class Tag, class Context>
+    struct match_elem_select;
+
+    template<class T, class Context>
+    struct match_elem_select<T, tag_terminal, Context> {
+      static bool match(T& t, Context *ctx) {
+        return t.match(ctx);
+      }
+    };
+
+    template<class T, class Context>
+    struct match_elem_select<T, tag_non_terminal, Context> {
+      static bool match(T& t, Context *ctx) {
+        return parse_fun(t, ctx);
+      }
+    };
+
+    template<class T, class Context>
+    inline bool match_elem(T& t, Context *ctx) {
+      return match_elem_select<T, typename symbol_trait<T>::tag_type, Context>::match(t, ctx);
+    }    
+  }
+
   template<class T>
-  struct container_for {
+  struct container_for_value {
     typedef std::vector<T> type;
   };
 
-  template<class T>
-  struct container_for<chr<T> > {
+  template<>
+  struct container_for_value<char> {
     typedef std::string type;
+  };
+  
+  template<class T>
+  struct container_for {
+    typedef typename container_for_value<typename symbol_trait<T>::value_type>::type type;
   };
   
   template<class T, class Container = typename container_for<T>::type >
   struct rep : public Container {
+    template<class Context>
+    bool match(Context *ctx) {
+      for (;;) {
+        T s;
+        if (!pi::match_elem(s, ctx)) break;
+        push_back(s);
+      }
+      return true;
+    }
   };
+  template<class T, class C>struct symbol_trait<rep<T, C> > : public terminal_trait_base<rep<T> > {};
 
   template<class T, class Container = typename container_for<T>::type >
   struct replus : public Container {
+    template<class Context>
+    bool match(Context *ctx) {
+      {
+        T s;
+        if (!pi::match_elem(s, ctx)) return false;
+        push_back(s);
+      }
+      for (;;) {
+        T s;
+        if (!pi::match_elem(s, ctx)) break;
+        push_back(s);
+      }
+      return true;
+    }
   };
+  template<class T, class C>struct symbol_trait<replus<T, C> > : public terminal_trait_base<replus<T> > {};
 
   template<class T>
   struct ptr : public T::result_type {
@@ -96,117 +227,31 @@ namespace peg {
 
   template<class T>
   struct opt : public boost::shared_ptr<T> {
-  };
-
-  struct sor {
-    bool left;
-  };
-
-  namespace pi {
-    struct null_struct;
-  }
-  
-  template<class T = pi::null_struct>
-  struct context {
-    size_t size;
-    size_t pos;
-    T *v;
-    T *operator->() { return v; }
-  };
-
-  template<class T>
-  struct term : public T {
-  };
-
-  namespace pi {
-    template<class T, class Context>
-    struct match_non_term {
-      static bool match(T& t, Context *ctx) {
-        return parse_fun(t, ctx);
-      }
-    };
-
-    template<class T, class Context>
-    struct match_elem : match_non_term<T, Context> {
-    };
-
-    template<class T, class Context>
-    struct match_elem<chr<T>, Context> {
-      static bool match(chr<T>& t, Context *ctx) {
-        if (ctx->cur != ctx->end) {
-          char c = *ctx->cur;
-          if (T()(c)) {
-            t.v = c;
-            ++ctx->cur;
-            return true;
-          }
-        }
-        return false;
-      }
-    };
-    
     template<class Context>
-    struct match_elem<eoi, Context> {
-      static bool match(eoi& t, Context *ctx) {
-        return ctx->cur == ctx->end;
+    bool match(Context *ctx) {
+      T s;
+      if (!pi::match_elem(s, ctx)) {
+        *this = 0;
+      } else {
+        *this = new T(s);
       }
-    };
-
-    template<class T, class C, class Context>
-    struct match_elem<rep<T, C>, Context> {
-      static bool match(rep<T>& t, Context *ctx) {
-        for (;;) {
-          T s;
-          if (!match_elem<T, Context>::match(s, ctx)) break;
-          t.push_back(s);
-        }
-        return true;
-      }
-    };
-
-    template<class T, class C, class Context>
-    struct match_elem<replus<T, C>, Context> {
-      static bool match(replus<T>& t, Context *ctx) {
-        {
-          T s;
-          if (!match_elem<T, Context>::match(s, ctx)) return false;
-          t.push_back(s);
-        }
-        for (;;) {
-          T s;
-          if (!match_elem<T, Context>::match(s, ctx)) break;
-          t.push_back(s);
-        }
-        return true;
-      }
-    };
-    
-    template<class T, class Context>
-    struct match_elem<opt<T>, Context> {
-      static bool match(opt<T>& t, Context *ctx) {
-        T s;
-        if (!match_elem<T, Context>::match(s, ctx)) {
-          t = 0;
-        } else {
-          t = new T(s);
-        }
-        return true;
-      }
-    };
-
+      return true;
+    }
+  };
+  template<class T>struct symbol_trait<opt<T> > : public terminal_trait_base<opt<T> > {};
+  
+  namespace pi {
     template<class Context>
     struct parse_fun_state {
-      bool finished;
       bool skipping;
-      typename Context::input_type start;
     };
 
     template<class T, class Context>
     struct rule_step {
       static void run(T& t, parse_fun_state<Context> *state, Context *ctx) {
-        if (state->finished || state->skipping) {
+        if (state->skipping) {
         } else {
-          state->skipping = !match_elem<T, Context>::match(t, ctx);
+          state->skipping = !match_elem(t, ctx);
         }
       }
     };
@@ -220,22 +265,6 @@ namespace peg {
       }
     };
     
-    template<class Context>
-    struct rule_step<sor, Context> {
-      static void run(sor& t, parse_fun_state<Context> *state, Context *ctx) {
-        if (state->finished) {
-          t.left = true;
-        } else if (state->skipping) {
-          state->skipping = false;
-          ctx->cur = state->start;
-          t.left = false;
-        } else {
-          state->finished = true;
-          t.left = true;
-        }
-      }
-    };
-
     template<class Context>
     struct run_steps_fun {
       parse_fun_state<Context> *state;
@@ -261,12 +290,10 @@ namespace peg {
     template<class T, class Context>
     inline bool parse_fun_core(T& t, Context *ctx) {
       parse_fun_state<Context> state;
-      state.finished = false;
       state.skipping = false;
-      state.start = ctx->cur;
       run_steps_fun<Context> step(&state, ctx);
       boost::fusion::for_each(t, step);
-      if (!state.finished && state.skipping) {
+      if (state.skipping) {
         return false;
       } else {
         return true;
@@ -297,14 +324,40 @@ namespace peg {
       }
     }
 
+    template<class Fun, class T, class Context>
+    inline bool execute_action(Fun fun, ptr<T>& t, Context *ctx) {
+      typedef typename boost::function_types::parameter_types<Fun>::type param_list;
+      typedef parse_fun_types<param_list> types;
+      typename types::result_list_type result;
+
+      typename Context::input_type cur = ctx->cur;
+      if (parse_fun_core(result, ctx)) {
+        t = boost::fusion::invoke(fun, result);
+        return true;
+      } else {
+        ctx->cur = cur;
+        return false;
+      }
+    }
+    
+    template<class T>
+    struct get_action_container {
+      typedef T type;
+    };
+
+    template<class T>
+    struct get_action_container<ptr<T> > {
+      typedef T type;
+    };
+
     template<class T, class Context>
     struct rep_action {
       template<std::size_t n>
       struct dummy_type;
 
       template<class U>
-      static bool call_action(U& t, Context *ctx, dummy_type<0*sizeof(&U::action)>*) {
-        return execute_action(&T::action, t, ctx);
+      static bool call_action(U& t, Context *ctx, dummy_type<0*sizeof(&get_action_container<U>::type::action)>*) {
+        return execute_action(&get_action_container<T>::type::action, t, ctx);
       }
 
       static bool call_action(T& t, Context *ctx, ...) {
@@ -313,8 +366,8 @@ namespace peg {
 
 #define PEG_CALL_ACTION_N(z, n, d) \
       template<class U> \
-        static bool call_action_##n(U& t, Context *ctx, bool executed, dummy_type<0*sizeof(&U::action_##n)>*) { \
-        return execute_action(&T::action_##n, t, ctx) || BOOST_PP_CAT(call_action_, BOOST_PP_INC(n))(t, ctx, true, (dummy_type<0>*)0); \
+      static bool call_action_##n(U& t, Context *ctx, bool executed, dummy_type<0*sizeof(&get_action_container<U>::type::action_##n)>*) { \
+        return execute_action(&get_action_container<T>::type::action_##n, t, ctx) || BOOST_PP_CAT(call_action_, BOOST_PP_INC(n))(t, ctx, true, (dummy_type<0>*)0); \
       } \
       \
       static bool call_action_##n(T& t, Context *ctx, bool executed, ...) { \
@@ -326,8 +379,8 @@ namespace peg {
 #undef PEG_CALL_ACTION_N
       
       template<class U>
-      static bool call_action_9(U& t, Context *ctx, bool executed, dummy_type<0*sizeof(&U::action_9)>*) {
-        return execute_action(&T::action_9, t, ctx);
+      static bool call_action_9(U& t, Context *ctx, bool executed, dummy_type<0*sizeof(&get_action_container<U>::type::action_9)>*) {
+        return execute_action(&get_action_container<T>::type::action_9, t, ctx);
       }
 
       static bool call_action_9(T& t, Context *ctx, bool executed, ...) {
@@ -349,22 +402,9 @@ namespace peg {
 
     template<class T>
     struct select_parse_fun<ptr<T>, parse_ptr_action_tag> {
-      template<class Fun, class Context>
-      static bool parse_fun_by_action(Fun fun, ptr<T>& t, Context *ctx) {
-        typedef typename boost::function_types::parameter_types<Fun>::type param_list;
-        typedef parse_fun_types<param_list> types;
-        typename types::result_list_type result;
-        if (parse_fun_core(result, ctx)) {
-          t = boost::fusion::invoke(fun, result);
-          return true;
-        } else {
-          return false;
-        }
-      }
-
       template<class Context>
       static bool parse_fun(ptr<T>& t, Context *ctx) {
-        return parse_fun_by_action(&T::action, t, ctx);
+        return rep_action<ptr<T>, Context>::start(t, ctx);
       }
     };
 
