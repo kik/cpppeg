@@ -9,6 +9,7 @@
 #endif
 
 #include <boost/type.hpp>
+#include <boost/preprocessor.hpp>
 #include <boost/type_traits.hpp>
 #include <boost/shared_ptr.hpp>
 
@@ -296,45 +297,45 @@ namespace peg {
       }
     }
 
-    template<std::size_t n>
-    struct param;
-    
     template<class T, class Context>
     struct rep_action {
+      template<std::size_t n>
+      struct dummy_type;
 
       template<class U>
-      static bool call_action(U& t, Context *ctx, param<0 * sizeof(&U::action)> *p) {
+      static bool call_action(U& t, Context *ctx, dummy_type<0*sizeof(&U::action)>*) {
         return execute_action(&T::action, t, ctx);
       }
 
       static bool call_action(T& t, Context *ctx, ...) {
-        return call_action_0(t, ctx, false, (param<0>*)0);
+        return call_action_0(t, ctx, false, (dummy_type<0>*)0);
       }
 
-      template<class U>
-      static bool call_action_0(U& t, Context *ctx, bool executed, param<0 * sizeof(&U::action_0)> *pp) {
-        return execute_action(&T::action_0, t, ctx) || call_action_1(t, ctx, true, (param<0>*)0);
-      }
-
-      static bool call_action_0(T& t, Context *ctx, bool executed, ...) {
-        return call_action_1(t, ctx, executed, (param<0>*)0);
+#define PEG_CALL_ACTION_N(z, n, d) \
+      template<class U> \
+        static bool call_action_##n(U& t, Context *ctx, bool executed, dummy_type<0*sizeof(&U::action_##n)>*) { \
+        return execute_action(&T::action_##n, t, ctx) || BOOST_PP_CAT(call_action_, BOOST_PP_INC(n))(t, ctx, true, (dummy_type<0>*)0); \
+      } \
+      \
+      static bool call_action_##n(T& t, Context *ctx, bool executed, ...) { \
+        return BOOST_PP_CAT(call_action_, BOOST_PP_INC(n))(t, ctx, executed, (dummy_type<0>*)0); \
       }
       
+      BOOST_PP_REPEAT(9, PEG_CALL_ACTION_N, 0)
+
+#undef PEG_CALL_ACTION_N
+      
       template<class U>
-      static bool call_action_1(U& t, Context *ctx, bool executed, param<0 * sizeof(&U::action_1)> *pp) {
-        return execute_action(&T::action_1, t, ctx) || call_action_2(t, ctx, true, (param<0>*)0);
+      static bool call_action_9(U& t, Context *ctx, bool executed, dummy_type<0*sizeof(&U::action_9)>*) {
+        return execute_action(&T::action_9, t, ctx);
       }
 
-      static bool call_action_1(T& t, Context *ctx, bool executed, ...) {
-        return call_action_2(t, ctx, executed, (param<0>*)0);
-      }
-      
-      static bool call_action_2(T& t, Context *ctx, bool executed, ...) {
+      static bool call_action_9(T& t, Context *ctx, bool executed, ...) {
         return false;
       }
 
       static bool start(T& t, Context *ctx) {
-        return call_action(t, ctx, (param<0>*)0);
+        return call_action(t, ctx, (dummy_type<0>*)0);
       }
     };
     
