@@ -217,6 +217,32 @@ namespace peg {
   };
   template<class T, class C>struct symbol_trait<replus<T, C> > : public terminal_trait_base<replus<T> > {};
 
+  namespace pi {
+    template<class T, bool opp>
+    struct if_unless {
+      template<class Context>
+      bool match(Context *ctx) {
+        T s;
+        typename Context::input_type cur = ctx->cur;
+        if (pi::match_elem(s, ctx)) {
+          ctx->cur = cur;
+          return true ^ opp;
+        }
+        return false ^ opp;
+      }
+    };
+  }
+  
+  template<class T>
+  struct if_ : public pi::if_unless<T, false> {
+  };
+  template<class T>struct symbol_trait<if_<T> > : public terminal_trait_base<if_<T> > {};
+
+  template<class T>
+  struct unless : public pi::if_unless<T, true> {
+  };
+  template<class T>struct symbol_trait<unless<T> > : public terminal_trait_base<unless<T> > {};
+  
   template<class T>
   struct ptr : public T::result_type {
     typedef typename T::result_type base_type;
@@ -227,13 +253,14 @@ namespace peg {
 
   template<class T>
   struct opt : public boost::shared_ptr<T> {
+    typedef boost::shared_ptr<T> base_type;
     template<class Context>
     bool match(Context *ctx) {
       T s;
       if (!pi::match_elem(s, ctx)) {
-        *this = 0;
+        base_type::reset();
       } else {
-        *this = new T(s);
+        reset(new T(s));
       }
       return true;
     }
